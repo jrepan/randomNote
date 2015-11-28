@@ -1,0 +1,15 @@
+clef.svg
+	License:	Public domain
+	Source:		Modified from https://commons.wikimedia.org/wiki/File:Treble_clef.svg
+
+note.svg
+	License:	Public domain
+	Source:		https://commons.wikimedia.org/wiki/File:1-4_note_crotchet_%28music%29.svg
+
+flat.svg
+	License:	Creative Commons Attribution-Share Alike 3.0 Unported (https://creativecommons.org/licenses/by-sa/3.0/deed.en)
+	Source:		Modified from https://commons.wikimedia.org/wiki/File:Music-flat.svg (2011-05-10 version)
+
+sharp.svg
+	License:	Creative Commons Attribution-Share Alike 3.0 Unported (https://creativecommons.org/licenses/by-sa/3.0/deed.en)
+	Source:		Modified from https://commons.wikimedia.org/wiki/File:Music-sharp.svg (2011-05-10 version) 
