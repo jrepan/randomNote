@@ -3,7 +3,7 @@ TEMPLATE = app
 QT += qml quick widgets multimedia
 
 QMAKE_CXXFLAGS += -std=c++14
-LIBS += -lfftw3f
+LIBS += -laubio
 
 SOURCES += main.cpp \
     musicallogic.cpp

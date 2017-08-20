@@ -1,4 +1,4 @@
-#ifndef MUSICALLOGIC_H
+﻿#ifndef MUSICALLOGIC_H
 #define MUSICALLOGIC_H
 
 #include <cstdint>
@@ -6,6 +6,7 @@
 #include <QAudioInput>
 #include <QBuffer>
 #include <QTimer>
+#include <aubio/aubio.h>
 
 class QQmlContext;
 
@@ -29,7 +30,6 @@ private:
 
 	const int sampleRate = 8000;
 	const int milliseconds = 1000;
-	const int framesCount = 1;
 
 	const double A4Frequency = 440;
 	const int A4Index = 0 + (4 - 1) * 12;
@@ -46,10 +46,9 @@ private:
 	QObject *scale;
 	QObject *margin;
 	QObject *canvas;
+	fvec_t *output;
 
 	int nextNote = A4Index;
-	double *frames;
-	int currentFrame = 0;
 };
 
 #endif // MUSICALLOGIC_H

@@ -1,4 +1,4 @@
-#include "musicallogic.h"
+﻿#include "musicallogic.h"
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
@@ -6,7 +6,6 @@
 #include <QTimer>
 #include <QQmlContext>
 #include <QQmlProperty>
-#include <fftw3.h>
 
 #define PLOT 0
 
@@ -32,22 +31,21 @@ const int scales[12][8] =
 };
 
 MusicalLogic::MusicalLogic(QQmlContext *c, QObject *rootObject):
-	context(c),
-	fromNote(rootObject->findChild<QObject*>("fromNote")),
-	fromOctave(rootObject->findChild<QObject*>("fromOctave")),
-	toNote(rootObject->findChild<QObject*>("toNote")),
-	toOctave(rootObject->findChild<QObject*>("toOctave")),
-	transposition(rootObject->findChild<QObject*>("transposition")),
-	semitones(rootObject->findChild<QObject*>("semitones")),
-	scale(rootObject->findChild<QObject*>("scale")),
-	margin(rootObject->findChild<QObject*>("marginOfError")),
-	canvas(rootObject->findChild<QObject*>("canvas"))
+    context(c),
+    fromNote(rootObject->findChild<QObject*>("fromNote")),
+    fromOctave(rootObject->findChild<QObject*>("fromOctave")),
+    toNote(rootObject->findChild<QObject*>("toNote")),
+    toOctave(rootObject->findChild<QObject*>("toOctave")),
+    transposition(rootObject->findChild<QObject*>("transposition")),
+    semitones(rootObject->findChild<QObject*>("semitones")),
+    scale(rootObject->findChild<QObject*>("scale")),
+    margin(rootObject->findChild<QObject*>("marginOfError")),
+    canvas(rootObject->findChild<QObject*>("canvas")),
+    output(new_fvec(1))
 {
 	assert(A4Index == getIndex(0, 4));
 	assert(getName(A4Index) == "A4");
 	assert(getFulltoneNumber(A4Index, true) == 0);
-
-	frames = new double[framesCount];
 
 	format.setSampleRate(sampleRate);
 	format.setChannelCount(1);
@@ -72,8 +70,9 @@ MusicalLogic::MusicalLogic(QQmlContext *c, QObject *rootObject):
 
 MusicalLogic::~MusicalLogic()
 {
+	del_fvec(output);
+	aubio_cleanup();
 	delete input;
-	delete[] frames;
 }
 
 void MusicalLogic::inputReady()
@@ -81,34 +80,16 @@ void MusicalLogic::inputReady()
 	input->stop();
 
 	int N = buffer.size() / sizeof(float);
-	int Nf = N / 2 + 1;
-	float *data = (float*) buffer.buffer().data();
 
-	fftwf_complex *freq = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * Nf);
-	fftwf_plan plan = fftwf_plan_dft_r2c_1d(N, data, freq, FFTW_ESTIMATE);
-	fftwf_execute(plan);
+	fvec_t data;
+	data.length = N;
+	data.data = (float*) buffer.buffer().data();
 
-	int max = -1;
-	float best = 0;
-	for (int i = 1; i < Nf; i++)
-	{
-		float cur = sqrt(freq[i][0]*freq[i][0] + freq[i][1]*freq[i][1]);
-		if (cur > best)
-			best = cur;
-	}
-	float prev;
-	for (int i = 1; i < Nf; i++)
-	{
-		float cur = sqrt(freq[i][0]*freq[i][0] + freq[i][1]*freq[i][1]);
-		if (cur * 10 > best || (max == i - 1 && cur > prev))
-		{
-//			qDebug() << i << cur;
-			max = i;
-			break;
-		}
-		prev = cur;
-	}
-	frames[currentFrame++] = max / ((double) N / sampleRate);
+	aubio_pitch_t *pitch = new_aubio_pitch("default", N, N, format.sampleRate()); //TODO: reuse
+	aubio_pitch_do(pitch, &data, output);
+	del_aubio_pitch(pitch);
+
+	double frequency = output->data[0];
 
 #if PLOT
 	double seconds = (double) milliseconds / millisecondsPerSecond;
@@ -119,47 +100,35 @@ void MusicalLogic::inputReady()
 	}
 #endif
 
-	if (currentFrame == framesCount)
+	double cents = 1200 * log2(frequency / getFrequency());
+	double marginOfError = QQmlProperty(margin, "value").read().toDouble();
+	context->setContextProperty("lastText", "difference: " + QString::number(cents) + " cents; got " + QString::number(frequency) + " Hz, expected " + QString::number(getFrequency()) + " Hz");
+	if (fabs(cents) < marginOfError)
 	{
-		double frequency = 0;
-		for (int i = 0; i < framesCount; i++)
-			frequency += frames[i];
-		frequency /= framesCount;
+		// Correct, choose new note
+		int from = getIndex(QQmlProperty(fromNote, "currentIndex").read().toInt(), QQmlProperty(fromOctave, "value").read().toInt());
+		int to = getIndex(QQmlProperty(toNote, "currentIndex").read().toInt(), QQmlProperty(toOctave, "value").read().toInt());
 
-		double cents = 1200 * log2(frequency / getFrequency());
-		double marginOfError = QQmlProperty(margin, "value").read().toDouble();
-		context->setContextProperty("lastText", "difference: " + QString::number(cents) + " cents; got " + QString::number(frequency) + " Hz, expected " + QString::number(getFrequency()) + " Hz");
-		if (fabs(cents) < marginOfError)
+		//TODO: prettier solution
+		do
 		{
-			// Correct, choose new note
-			int from = getIndex(QQmlProperty(fromNote, "currentIndex").read().toInt(), QQmlProperty(fromOctave, "value").read().toInt());
-			int to = getIndex(QQmlProperty(toNote, "currentIndex").read().toInt(), QQmlProperty(toOctave, "value").read().toInt());
-
-			//TODO: prettier solution
-			do
-			{
-				nextNote = rand() % (to - from + 1) + from;
-			}
-			while (!QQmlProperty(semitones, "isChecked").read().toBool() && !isFulltone(nextNote));
-
-			context->setContextProperty("sharp", !isFulltone(nextNote));
-			context->setContextProperty("noteY", getFulltoneNumber(nextNote, true));
-			int extraLinesAbove = (getFulltoneNumber(nextNote, true) - 5) / 2;
-			int extraLinesBelow = (-getFulltoneNumber(nextNote, true) - 3) / 2;
-			context->setContextProperty("extraLinesAbove", extraLinesAbove > 0 ? extraLinesAbove : 0);
-			context->setContextProperty("extraLinesBelow", extraLinesBelow > 0 ? extraLinesBelow : 0);
-#if !PLOT
-			QMetaObject::invokeMethod(canvas, "requestPaint");
-#endif
+			nextNote = rand() % (to - from + 1) + from;
 		}
-		currentFrame = 0;
+		while (!QQmlProperty(semitones, "isChecked").read().toBool() && !isFulltone(nextNote));
+
+		context->setContextProperty("sharp", !isFulltone(nextNote));
+		context->setContextProperty("noteY", getFulltoneNumber(nextNote, true));
+		int extraLinesAbove = (getFulltoneNumber(nextNote, true) - 5) / 2;
+		int extraLinesBelow = (-getFulltoneNumber(nextNote, true) - 3) / 2;
+		context->setContextProperty("extraLinesAbove", extraLinesAbove > 0 ? extraLinesAbove : 0);
+		context->setContextProperty("extraLinesBelow", extraLinesBelow > 0 ? extraLinesBelow : 0);
+#if !PLOT
+		QMetaObject::invokeMethod(canvas, "requestPaint");
+#endif
 	}
 #if PLOT
 	QMetaObject::invokeMethod(canvas, "requestPaint");
 #endif
-
-	fftwf_destroy_plan(plan);
-	fftwf_free(freq);
 
 	buffer.close();
 	buffer.setData(emptyData);
